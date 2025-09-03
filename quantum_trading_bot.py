@@ -30,14 +30,14 @@ try:
     WS_AVAILABLE = True
 except ImportError:
     WS_AVAILABLE = False
-    print("⚠️ websockets not installed - degraded to HTTP mode")
+    print("?????? websockets not installed - degraded to HTTP mode")
 
 try:
     from prometheus_client import Counter, Gauge, Histogram, generate_latest
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
-    print("⚠️ prometheus_client not installed - metrics disabled")
+    print("?????? prometheus_client not installed - metrics disabled")
 
 # ======================== QUANTUM CONFIGURATION ========================
 
@@ -207,7 +207,7 @@ class CircuitBreaker:
             self.trip_times[symbol] = datetime.now()
             
             if self.trip_counts[symbol] >= self.max_trips:
-                print(f"🔴 CIRCUIT BREAKER TRIPPED for {symbol}")
+                print(f"???? CIRCUIT BREAKER TRIPPED for {symbol}")
                 return False
                 
         # Check cooldown
@@ -223,7 +223,7 @@ class CircuitBreaker:
     def emergency_shutdown(self):
         """Emergency stop all trading"""
         self.emergency_stop = True
-        print("🚨 EMERGENCY SHUTDOWN ACTIVATED")
+        print("???? EMERGENCY SHUTDOWN ACTIVATED")
 
 # ======================== QUANTUM STATE MANAGER ========================
 
@@ -288,7 +288,7 @@ class QuantumTradingOrchestrator:
                 asyncio.create_task(self.websocket_listener(symbol))
                 
             self.stats['websocket_status'] = f"Connected to {len(symbols)} streams"
-            print(f"⚡ WebSocket streams initialized for {len(symbols)} pairs")
+            print(f"??? WebSocket streams initialized for {len(symbols)} pairs")
             
         except Exception as e:
             print(f"WebSocket initialization error: {e}")
@@ -303,7 +303,7 @@ class QuantumTradingOrchestrator:
             try:
                 async with websockets.connect(url) as ws:
                     self.ws_connections[symbol] = ws
-                    print(f"📡 WebSocket connected: {symbol}")
+                    print(f"???? WebSocket connected: {symbol}")
                     
                     async for message in ws:
                         data = json.loads(message)
@@ -455,7 +455,7 @@ class QuantumTradingOrchestrator:
             await asyncio.sleep(np.random.exponential(300))  # Average 5 minutes
             
             event = np.random.choice(chaos_events)
-            print(f"💥 CHAOS EVENT: {event}")
+            print(f"???? CHAOS EVENT: {event}")
             
             if event == "network_latency":
                 await asyncio.sleep(np.random.uniform(1, 5))
@@ -475,7 +475,7 @@ class QuantumTradingOrchestrator:
             
     async def run_quantum_loop(self):
         """Main async event loop with all subsystems"""
-        print("🚀 Quantum Trading Core Online")
+        print("???? Quantum Trading Core Online")
         
         # Initialize subsystems
         await self.initialize_websockets()
@@ -518,7 +518,7 @@ class QuantumTradingOrchestrator:
                     
                 # Self-healing check
                 if self.stats['chaos_resistance'] < 50:
-                    print("🔧 Self-healing activated...")
+                    print("???? Self-healing activated...")
                     await self.self_heal()
                     
                 await asyncio.sleep(1)  # Ultra-fast loop
@@ -530,7 +530,7 @@ class QuantumTradingOrchestrator:
                 
     async def self_heal(self):
         """Self-healing mechanisms"""
-        print("🏥 Running self-diagnostics...")
+        print("???? Running self-diagnostics...")
         
         # Clear corrupted data
         for symbol in list(self.tick_buffer.keys()):
@@ -550,7 +550,7 @@ class QuantumTradingOrchestrator:
         gc.collect()
         
         self.stats['chaos_resistance'] = min(100, self.stats['chaos_resistance'] + 30)
-        print("✅ Self-healing complete")
+        print("??? Self-healing complete")
 
 # ======================== ELITE DASHBOARD ========================
 
@@ -780,7 +780,7 @@ class EliteDashboardHandler(BaseHTTPRequestHandler):
         </head>
         <body>
             <div class="quantum-header">
-                <h1>⚛️ QUANTUM TRADING SYSTEM</h1>
+                <h1>?????? QUANTUM TRADING SYSTEM</h1>
                 <div class="status-bar">
                     <div class="status-indicator">
                         <div class="pulse-dot green"></div>
@@ -802,33 +802,33 @@ class EliteDashboardHandler(BaseHTTPRequestHandler):
             
             <div class="metrics-grid">
                 <div class="metric-card">
-                    <div class="metric-label">💰 Balance</div>
+                    <div class="metric-label">???? Balance</div>
                     <div class="metric-value">${orchestrator.stats.get('balance', 0):.2f}</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">📈 Total P&L</div>
+                    <div class="metric-label">???? Total P&L</div>
                     <div class="metric-value">${orchestrator.stats.get('total_pnl', 0):.2f}</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">🎯 Win Rate</div>
+                    <div class="metric-label">???? Win Rate</div>
                     <div class="metric-value">{orchestrator.stats.get('win_rate', 0):.1f}%</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">📊 Sharpe Ratio</div>
+                    <div class="metric-label">???? Sharpe Ratio</div>
                     <div class="metric-value">{orchestrator.stats.get('sharpe_ratio', 0):.2f}</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">🔬 Shadow P&L</div>
+                    <div class="metric-label">???? Shadow P&L</div>
                     <div class="metric-value">${orchestrator.stats.get('shadow_pnl', 0):.2f}</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">⚡ Positions</div>
+                    <div class="metric-label">??? Positions</div>
                     <div class="metric-value">{orchestrator.stats.get('open_positions', 0)}/{orchestrator.stats.get('shadow_positions', 0)}</div>
                 </div>
             </div>
             
             <div class="neural-display">
-                <h2>🧠 Market Regime Detection</h2>
+                <h2>???? Market Regime Detection</h2>
                 <div style="margin: 15px 0;">
                     <span class="regime-indicator {orchestrator.stats.get('current_regime', 'STEADY_CLIMB')}">
                         {orchestrator.stats.get('current_regime', 'STEADY_CLIMB')}
@@ -838,14 +838,14 @@ class EliteDashboardHandler(BaseHTTPRequestHandler):
             </div>
             
             <div class="shadow-trading">
-                <h2>👻 Shadow Trading Engine</h2>
+                <h2>???? Shadow Trading Engine</h2>
                 <p>Running {orchestrator.stats.get('shadow_positions', 0)} shadow positions</p>
                 <p>Shadow Balance: ${orchestrator.stats.get('shadow_balance', 0):.2f}</p>
                 <p>A/B Testing: {'ACTIVE' if ENABLE_SHADOW_TRADING else 'DISABLED'}</p>
             </div>
             
             <div class="ml-predictions">
-                <h3>🤖 ML Predictions</h3>
+                <h3>???? ML Predictions</h3>
                 {"".join([f'''
                 <div class="prediction-card">
                     <div>{symbol}</div>
@@ -859,7 +859,7 @@ class EliteDashboardHandler(BaseHTTPRequestHandler):
             
             <div style="text-align: center; margin-top: 30px; opacity: 0.7;">
                 <p>Quantum Core v7.0 | God Mode Active | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
-                <p>🚀 Tomorrow's Technology, Today's Profits</p>
+                <p>???? Tomorrow's Technology, Today's Profits</p>
             </div>
         </body>
         </html>
@@ -911,7 +911,7 @@ class EliteDashboardHandler(BaseHTTPRequestHandler):
 
 async def send_quantum_telegram():
     """Send advanced Telegram updates"""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    if False:
         return
         
     try:
@@ -919,31 +919,31 @@ async def send_quantum_telegram():
         
         # Prepare quantum message
         regime_emoji = {
-            'BULL_EUPHORIA': '🚀',
-            'STEADY_CLIMB': '📈',
-            'CHOPPY': '🌊',
-            'BEAR_PANIC': '🐻',
-            'BLACK_SWAN': '🦢'
+            'BULL_EUPHORIA': '????',
+            'STEADY_CLIMB': '????',
+            'CHOPPY': '????',
+            'BEAR_PANIC': '????',
+            'BLACK_SWAN': '????'
         }
         
         current_regime = orchestrator.stats.get('current_regime', 'STEADY_CLIMB')
         
-        message = f"""⚛️ **QUANTUM TRADING REPORT**
+        message = f"""?????? **QUANTUM TRADING REPORT**
 
-{regime_emoji.get(current_regime, '📊')} **Market Regime:** {current_regime}
+{regime_emoji.get(current_regime, '????')} **Market Regime:** {current_regime}
 
-💰 **Balance:** ${orchestrator.stats.get('balance', 0):.2f}
-📈 **Total P&L:** ${orchestrator.stats.get('total_pnl', 0):.2f}
-👻 **Shadow P&L:** ${orchestrator.stats.get('shadow_pnl', 0):.2f}
-🎯 **Win Rate:** {orchestrator.stats.get('win_rate', 0):.1f}%
-📊 **Sharpe:** {orchestrator.stats.get('sharpe_ratio', 0):.2f}
-⚡ **Latency:** {orchestrator.stats.get('latency_ms', 0):.1f}ms
+???? **Balance:** ${orchestrator.stats.get('balance', 0):.2f}
+???? **Total P&L:** ${orchestrator.stats.get('total_pnl', 0):.2f}
+???? **Shadow P&L:** ${orchestrator.stats.get('shadow_pnl', 0):.2f}
+???? **Win Rate:** {orchestrator.stats.get('win_rate', 0):.1f}%
+???? **Sharpe:** {orchestrator.stats.get('sharpe_ratio', 0):.2f}
+??? **Latency:** {orchestrator.stats.get('latency_ms', 0):.1f}ms
 
-🧠 **Neural Confidence:** {orchestrator.stats.get('neural_confidence', 0.5)*100:.1f}%
-🛡️ **Chaos Resistance:** {orchestrator.stats.get('chaos_resistance', 100):.0f}%
+???? **Neural Confidence:** {orchestrator.stats.get('neural_confidence', 0.5)*100:.1f}%
+??????? **Chaos Resistance:** {orchestrator.stats.get('chaos_resistance', 100):.0f}%
 
-🔗 [Quantum Dashboard](http://localhost:{PORT})
-⏰ {datetime.now().strftime('%H:%M:%S')} UTC"""
+???? [Quantum Dashboard](http://localhost:{PORT})
+??? {datetime.now().strftime('%H:%M:%S')} UTC"""
         
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         
@@ -969,9 +969,9 @@ async def telegram_quantum_loop():
 def run_quantum_server():
     """Run the elite dashboard server"""
     server = HTTPServer(('0.0.0.0', PORT), EliteDashboardHandler)
-    print(f"⚡ Quantum Dashboard: http://localhost:{PORT}")
-    print(f"📊 Prometheus Metrics: http://localhost:{PORT}/metrics")
-    print(f"🔌 Quantum API: http://localhost:{PORT}/api/quantum")
+    print(f"??? Quantum Dashboard: http://localhost:{PORT}")
+    print(f"???? Prometheus Metrics: http://localhost:{PORT}/metrics")
+    print(f"???? Quantum API: http://localhost:{PORT}/api/quantum")
     server.serve_forever()
 
 def run_legacy_bot():
@@ -982,7 +982,7 @@ def run_legacy_bot():
     while retry_count < max_retries:
         try:
             if not os.path.exists('trading_bot.py'):
-                print("⚠️ trading_bot.py not found - running in standalone mode")
+                print("?????? trading_bot.py not found - running in standalone mode")
                 orchestrator.stats['status'] = 'Standalone Quantum Mode'
                 return
                 
@@ -996,7 +996,7 @@ def run_legacy_bot():
                 env=os.environ.copy()
             )
             
-            print(f"✅ Legacy bot started (PID: {process.pid})")
+            print(f"??? Legacy bot started (PID: {process.pid})")
             orchestrator.stats['status'] = 'Quantum Enhanced'
             
             for line in iter(process.stdout.readline, ''):
@@ -1057,22 +1057,22 @@ async def update_stats_from_legacy():
 if __name__ == "__main__":
     # Print epic startup banner
     print("""
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                                                              ║
-    ║     ⚛️  QUANTUM TRADING SYSTEM v7.0 - GOD MODE  ⚛️           ║
-    ║                                                              ║
-    ║     🚀 Ultra-Low Latency WebSocket Streams                  ║
-    ║     🧠 Adaptive ML-Powered Predictions                      ║
-    ║     👻 Shadow Trading A/B Testing Engine                    ║
-    ║     🛡️  Chaos-Resistant Circuit Breakers                    ║
-    ║     📊 Prometheus Metrics & Observability                   ║
-    ║     ⚡ GPU-Accelerated Computations                         ║
-    ║     🔬 Market Microstructure Analytics                      ║
-    ║     🎯 Self-Tuning Risk Parameters                          ║
-    ║                                                              ║
-    ║             Tomorrow's Technology, Today's Profits          ║
-    ║                                                              ║
-    ╚══════════════════════════════════════════════════════════════╝
+    ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+    ???                                                              ???
+    ???     ??????  QUANTUM TRADING SYSTEM v7.0 - GOD MODE  ??????           ???
+    ???                                                              ???
+    ???     ???? Ultra-Low Latency WebSocket Streams                  ???
+    ???     ???? Adaptive ML-Powered Predictions                      ???
+    ???     ???? Shadow Trading A/B Testing Engine                    ???
+    ???     ???????  Chaos-Resistant Circuit Breakers                    ???
+    ???     ???? Prometheus Metrics & Observability                   ???
+    ???     ??? GPU-Accelerated Computations                         ???
+    ???     ???? Market Microstructure Analytics                      ???
+    ???     ???? Self-Tuning Risk Parameters                          ???
+    ???                                                              ???
+    ???             Tomorrow's Technology, Today's Profits          ???
+    ???                                                              ???
+    ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
     """)
     
     try:
@@ -1105,13 +1105,13 @@ if __name__ == "__main__":
         # Run legacy bot if available
         threading.Thread(target=run_legacy_bot, daemon=True).start()
         
-        print("\n✅ QUANTUM CORE INITIALIZED")
-        print(f"📡 WebSockets: {'ENABLED' if WS_AVAILABLE else 'DISABLED'}")
-        print(f"📊 Prometheus: {'ENABLED' if PROMETHEUS_AVAILABLE else 'DISABLED'}")
-        print(f"👻 Shadow Trading: {'ENABLED' if ENABLE_SHADOW_TRADING else 'DISABLED'}")
-        print(f"🧠 ML Predictions: {'ENABLED' if ENABLE_ML_PREDICTIONS else 'DISABLED'}")
-        print(f"💥 Chaos Engineering: {'ENABLED' if ENABLE_CHAOS_ENGINEERING else 'DISABLED'}")
-        print(f"⚡ GPU Acceleration: {'ENABLED' if GPU_ACCELERATION else 'DISABLED'}")
+        print("\n??? QUANTUM CORE INITIALIZED")
+        print(f"???? WebSockets: {'ENABLED' if WS_AVAILABLE else 'DISABLED'}")
+        print(f"???? Prometheus: {'ENABLED' if PROMETHEUS_AVAILABLE else 'DISABLED'}")
+        print(f"???? Shadow Trading: {'ENABLED' if ENABLE_SHADOW_TRADING else 'DISABLED'}")
+        print(f"???? ML Predictions: {'ENABLED' if ENABLE_ML_PREDICTIONS else 'DISABLED'}")
+        print(f"???? Chaos Engineering: {'ENABLED' if ENABLE_CHAOS_ENGINEERING else 'DISABLED'}")
+        print(f"??? GPU Acceleration: {'ENABLED' if GPU_ACCELERATION else 'DISABLED'}")
         
         # Keep main thread alive
         while True:
@@ -1124,11 +1124,11 @@ if __name__ == "__main__":
                   f"Latency: {orchestrator.stats.get('latency_ms', 0):.1f}ms")
             
     except KeyboardInterrupt:
-        print("\n\n🛑 QUANTUM SHUTDOWN INITIATED")
+        print("\n\n???? QUANTUM SHUTDOWN INITIATED")
         orchestrator.circuit_breaker.emergency_shutdown()
         sys.exit(0)
         
     except Exception as e:
-        print(f"💥 QUANTUM CORE EXCEPTION: {e}")
+        print(f"???? QUANTUM CORE EXCEPTION: {e}")
         import traceback
         traceback.print_exc()
