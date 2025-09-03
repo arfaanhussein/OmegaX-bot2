@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 CRYPTO TRADING BOT LAUNCHER v7.0 OMNIPOTENT EDITION
 ====================================================
@@ -26,15 +26,15 @@ warnings.filterwarnings('ignore')
 
 # Advanced imports for god-mode features
 try:
-    import websockets
-    WS_AVAILABLE = True
+    #import websockets
+    WS_AVAILABLE = False
 except ImportError:
     WS_AVAILABLE = False
     print("?????? websockets not installed - degraded to HTTP mode")
 
 try:
-    from prometheus_client import Counter, Gauge, Histogram, generate_latest
-    PROMETHEUS_AVAILABLE = True
+    #from prometheus_client import Counter, Gauge, Histogram, generate_latest
+    PROMETHEUS_AVAILABLE = False
 except ImportError:
     PROMETHEUS_AVAILABLE = False
     print("?????? prometheus_client not installed - metrics disabled")
@@ -84,13 +84,13 @@ os.environ.setdefault("ENABLE_TRAILING_SL", "true")
 os.environ.setdefault("TESTNET", "true")
 
 # God-mode features
-ENABLE_SHADOW_TRADING = True
-ENABLE_ML_PREDICTIONS = True
+ENABLE_SHADOW_TRADING = False
+ENABLE_ML_PREDICTIONS = False
 ENABLE_CIRCUIT_BREAKERS = True
 ENABLE_CHAOS_ENGINEERING = False  # Set True for resilience testing
 GPU_ACCELERATION = np.__version__ >= "1.20"  # Check numpy supports vectorization
 
-PORT = int(os.environ.get("PORT", 8000))
+PORT = int(os.environ.get("PORT", 10000))
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
@@ -125,7 +125,7 @@ class AdaptiveRiskManager:
         self.base_sl = float(os.environ["STOP_LOSS_PCT"])
         self.base_tp = float(os.environ["TAKE_PROFIT_PCT"])
         self.pnl_history = deque(maxlen=100)
-        self.vol_history = deque(maxlen=50)
+        self.vol_history = deque(maxlen=10)
         self.regime_history = deque(maxlen=20)
         self.current_regime = 'STEADY_CLIMB'
         self.adaptation_rate = 0.1
@@ -238,8 +238,8 @@ class QuantumTradingOrchestrator:
         self.shadow_positions = {}  # Shadow trading for A/B testing
         self.real_positions = {}
         self.ws_connections = {}
-        self.executor = ThreadPoolExecutor(max_workers=20)
-        self.gpu_executor = ProcessPoolExecutor(max_workers=4) if GPU_ACCELERATION else None
+        self.executor = ThreadPoolExecutor(max_workers=2)
+        self.gpu_executor = None  # Disabled if GPU_ACCELERATION else None
         
         # Advanced statistics
         self.stats = {
@@ -272,7 +272,7 @@ class QuantumTradingOrchestrator:
         
         # Initialize data storage
         self.price_history = defaultdict(lambda: pd.DataFrame())
-        self.tick_buffer = defaultdict(lambda: deque(maxlen=1000))
+        self.tick_buffer = defaultdict(lambda: deque(maxlen=100))
         
     async def initialize_websockets(self):
         """Establish WebSocket connections for ultra-low latency"""
@@ -1132,3 +1132,4 @@ if __name__ == "__main__":
         print(f"???? QUANTUM CORE EXCEPTION: {e}")
         import traceback
         traceback.print_exc()
+
