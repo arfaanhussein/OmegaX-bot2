@@ -17,15 +17,13 @@ Fine-tuning optimizations applied:
 
 import os
 import sys
-import gzip
-import gzip
-import gzip
-import gzip
 import json
 import time
 import threading
 import random
 import logging
+import gzip  # Added for gzip decompression
+import io    # Added for BytesIO handling
 from datetime import datetime, timedelta
 from collections import deque, defaultdict
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -67,10 +65,9 @@ BALANCE_FILE: str = 'balance.json'
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        # Could add RotatingFileHandler here for production
     ]
 )
 logger = logging.getLogger(__name__)
@@ -167,8 +164,6 @@ except OSError as e:
     sys.exit(1)
 
 # ======================== TRADING ALGORITHMS REGISTRY ========================
-# Using frozen dict would be better, but keeping original structure
-# Added type hints for better code clarity
 
 TRADING_ALGORITHMS: Dict[str, Dict[str, str]] = {
     'ORDER_FLOW_TOXICITY': {
@@ -293,13 +288,7 @@ ALGORITHM_IDS: List[str] = list(TRADING_ALGORITHMS.keys())
 # ======================== DECORATORS ========================
 
 def retry_on_exception(max_retries: int = MAX_RETRIES, delay: float = 1.0, backoff: float = 2.0):
-    """Decorator to retry function on exception with exponential backoff.
-    
-    Args:
-        max_retries: Maximum number of retry attempts
-        delay: Initial delay between retries in seconds
-        backoff: Multiplier for delay after each retry
-    """
+    """Decorator to retry function on exception with exponential backoff."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -323,11 +312,7 @@ def retry_on_exception(max_retries: int = MAX_RETRIES, delay: float = 1.0, backo
     return decorator
 
 def thread_safe(lock):
-    """Decorator to make function thread-safe using provided lock.
-    
-    Args:
-        lock: Threading lock object
-    """
+    """Decorator to make function thread-safe using provided lock."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -336,30 +321,42 @@ def thread_safe(lock):
         return wrapper
     return decorator
 
+# ======================== HELPER FUNCTIONS ========================
+
+def safe_decode_response(data: bytes) -> str:
+    """Safely decode response data, handling gzip compression.
+    
+    Args:
+        data: Raw bytes from response
+        
+    Returns:
+        Decoded string
+    """
+    if not data:
+        return ""
+    
+    # Check if data is gzipped
+    if data[:2] == b'\x1f\x8b':
+        try:
+            data = gzip.decompress(data)
+        except Exception as e:
+            logger.debug(f"Gzip decompression failed: {e}")
+    
+    # Try to decode as UTF-8
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        # Fallback to latin-1 which accepts all byte values
+        return data.decode('latin-1', errors='ignore')
+
 # ======================== BINANCE API CLIENT ========================
 
 class BinanceAPIClient:
-    """Production-ready Binance API client with advanced rate limiting and error handling.
-    
-    Features:
-        - Intelligent rate limiting with weight tracking
-        - Circuit breaker pattern for fault tolerance
-        - Request caching to minimize API calls
-        - Exponential backoff retry logic
-        - Comprehensive error handling
-        - Connection pooling (simulated via urllib)
-    
-    Attributes:
-        base_url: Binance REST API endpoint
-        request_times: Sliding window of request timestamps
-        weight_used: Current weight consumption
-        circuit_open: Circuit breaker state
-        price_cache: LRU cache for price data
-    """
+    """Production-ready Binance API client with advanced rate limiting and error handling."""
     
     def __init__(self) -> None:
         """Initialize Binance API client with optimized settings."""
-        # API endpoints - using ternary for clarity
+        # API endpoints
         self.base_url: str = (
             'https://testnet.binance.vision/api/v3' if USE_TESTNET 
             else 'https://api.binance.com/api/v3'
@@ -369,38 +366,38 @@ class BinanceAPIClient:
             else 'https://fapi.binance.com/fapi/v1'
         )
         
-        # Rate limiting with optimized deque
+        # Rate limiting
         self.request_times: Deque[float] = deque(maxlen=1200)
         self.weight_used: int = 0
         self.weight_limit: int = 1200
         self.last_reset: float = time.time()
         
-        # Circuit breaker pattern
+        # Circuit breaker
         self.consecutive_errors: int = 0
         self.max_consecutive_errors: int = 5
         self.circuit_open: bool = False
         self.circuit_open_until: float = 0
         
-        # Request tracking for metrics
+        # Request tracking
         self.total_requests: int = 0
         self.failed_requests: int = 0
         
-        # Optimized cache with explicit typing
+        # Cache
         self.price_cache: Dict[str, Any] = {}
         self.cache_timestamp: Dict[str, float] = {}
         self.cache_duration: float = CACHE_DURATION
         
-        # Thread lock for thread-safe operations
+        # Thread lock
         self._lock = threading.RLock()
         
-        # Predefine supported symbols for O(1) lookup
+        # Supported symbols
         self.symbols: set = {
             'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'ADAUSDT',
             'XRPUSDT', 'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'MATICUSDT',
             'LINKUSDT', 'UNIUSDT', 'ATOMUSDT', 'LTCUSDT', 'NEARUSDT'
         }
         
-        # Precompute symbol mapping for performance
+        # Symbol mapping
         self._symbol_mapping: Dict[str, str] = {
             symbol: f"{symbol[:-4]}/{symbol[-4:]}" 
             for symbol in self.symbols 
@@ -411,29 +408,22 @@ class BinanceAPIClient:
     
     @thread_safe(threading.RLock())
     def _check_rate_limit(self, weight: int = 1) -> None:
-        """Check and enforce rate limits before making requests.
-        
-        Args:
-            weight: Request weight for rate limiting
-            
-        Note:
-            Uses sliding window algorithm for accurate rate limiting
-        """
+        """Check and enforce rate limits before making requests."""
         current_time: float = time.time()
         
-        # Reset weight counter every minute (optimized check)
+        # Reset weight counter every minute
         time_since_reset: float = current_time - self.last_reset
         if time_since_reset > 60:
             self.weight_used = 0
             self.last_reset = current_time
-            self.request_times.clear()  # Clear old timestamps
+            self.request_times.clear()
         
         # Check if approaching rate limit
         projected_weight: int = self.weight_used + weight
         if projected_weight > self.weight_limit * RATE_LIMIT_THRESHOLD:
             sleep_time: float = 60 - time_since_reset
             if sleep_time > 0:
-                logger.warning(f"Rate limit approaching ({projected_weight}/{self.weight_limit}), sleeping for {sleep_time:.1f}s")
+                logger.warning(f"Rate limit approaching, sleeping for {sleep_time:.0f}s")
                 time.sleep(sleep_time)
                 self.weight_used = 0
                 self.last_reset = time.time()
@@ -442,24 +432,17 @@ class BinanceAPIClient:
         self.request_times.append(current_time)
     
     def _check_circuit_breaker(self) -> bool:
-        """Check circuit breaker state with automatic reset.
-        
-        Returns:
-            True if circuit is closed (safe to proceed), False if open
-        """
+        """Check circuit breaker state with automatic reset."""
         if not self.circuit_open:
             return True
             
         current_time: float = time.time()
         if current_time >= self.circuit_open_until:
-            # Reset circuit breaker
             self.circuit_open = False
             self.consecutive_errors = 0
-            logger.info("Circuit breaker reset - resuming normal operation")
+            logger.info("Circuit breaker reset")
             return True
         
-        remaining: float = self.circuit_open_until - current_time
-        logger.debug(f"Circuit breaker open for {remaining:.1f}s more")
         return False
     
     def _make_request(
@@ -469,35 +452,20 @@ class BinanceAPIClient:
         weight: int = 1, 
         max_retries: int = MAX_RETRIES
     ) -> Optional[Any]:
-        """Execute HTTP request with comprehensive error handling.
-        
-        Args:
-            endpoint: API endpoint path
-            params: Query parameters
-            weight: Request weight for rate limiting
-            max_retries: Maximum retry attempts
-            
-        Returns:
-            Parsed JSON response or None on failure
-            
-        Note:
-            Implements exponential backoff and circuit breaker patterns
-        """
+        """Execute HTTP request with comprehensive error handling and gzip support."""
         # Circuit breaker check
         if not self._check_circuit_breaker():
-            logger.warning("Circuit breaker is open, using cached data")
             return None
         
         # Rate limiting check
         self._check_rate_limit(weight)
         
-        # Build URL with parameters
+        # Build URL
         url: str = f"{self.base_url}/{endpoint}"
         if params:
-            # Use urllib.parse for safe URL encoding
             url += '?' + urllib.parse.urlencode(params)
         
-        # Retry loop with exponential backoff
+        # Retry loop
         for attempt in range(max_retries):
             try:
                 self.total_requests += 1
@@ -511,44 +479,51 @@ class BinanceAPIClient:
                     'Cache-Control': 'no-cache'
                 }
                 
-                # Add API key if available
                 if BINANCE_API_KEY:
                     headers['X-MBX-APIKEY'] = BINANCE_API_KEY
                 
                 # Create and execute request
                 req = urllib.request.Request(url, headers=headers)
                 
-                # Use context manager for proper resource cleanup
                 with urllib.request.urlopen(req, timeout=API_TIMEOUT) as response:
                     if response.status == 200:
                         # Success - reset error counter
                         self.consecutive_errors = 0
                         
-                        # Parse response
-                        data = json.loads(response.read().decode('utf-8'))
-                        return data
+                        # Read raw data
+                        raw_data = response.read()
+                        
+                        # Decode (handles gzip automatically)
+                        text = safe_decode_response(raw_data)
+                        
+                        # Parse JSON
+                        try:
+                            return json.loads(text)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"JSON decode error: {e}")
+                            logger.debug(f"Response text: {text[:200]}...")
+                            return None
                     else:
                         logger.warning(f"Unexpected status code: {response.status}")
                         
             except urllib.error.HTTPError as e:
                 self.failed_requests += 1
                 
-                # Handle specific HTTP errors
-                if e.code == 429:  # Rate limit exceeded
+                if e.code == 429:  # Rate limit
                     retry_after: int = int(e.headers.get('Retry-After', 60))
-                    logger.warning(f"Rate limit exceeded (429), waiting {retry_after}s")
+                    logger.warning(f"Rate limit exceeded, waiting {retry_after}s")
                     time.sleep(retry_after)
                     continue
                     
                 elif e.code == 418:  # IP ban
-                    logger.error("IP banned by Binance (418)!")
+                    logger.error("IP banned by Binance!")
                     self.circuit_open = True
                     self.circuit_open_until = time.time() + IP_BAN_COOLDOWN
                     return None
                     
                 elif e.code in (500, 502, 503, 504):  # Server errors
                     wait_time: float = (2 ** attempt) + random.uniform(0, 1)
-                    logger.warning(f"Server error {e.code}, retry {attempt + 1}/{max_retries} in {wait_time:.1f}s")
+                    logger.warning(f"Server error {e.code}, retry in {wait_time:.1f}s")
                     time.sleep(wait_time)
                     continue
                     
@@ -559,38 +534,27 @@ class BinanceAPIClient:
                 self.failed_requests += 1
                 logger.error(f"Network error: {e.reason}")
                 
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                self.failed_requests += 1
-                logger.error(f"Response parsing error: {e}")
-                
             except Exception as e:
                 self.failed_requests += 1
-                logger.error(f"Unexpected error in request: {e}")
+                logger.error(f"Unexpected error: {e}")
             
-            # Exponential backoff between retries
+            # Exponential backoff
             if attempt < max_retries - 1:
                 wait_time: float = min(30, (2 ** attempt) + random.uniform(0, 1))
                 time.sleep(wait_time)
         
-        # Max retries exceeded - update circuit breaker
+        # Max retries exceeded
         self.consecutive_errors += 1
         if self.consecutive_errors >= self.max_consecutive_errors:
             self.circuit_open = True
             self.circuit_open_until = time.time() + CIRCUIT_BREAKER_COOLDOWN
-            logger.error(f"Too many consecutive errors ({self.consecutive_errors}), opening circuit breaker")
+            logger.error("Opening circuit breaker due to consecutive errors")
         
         return None
     
     @lru_cache(maxsize=128)
     def _format_symbol(self, symbol: str) -> str:
-        """Format symbol to our standard format (cached for performance).
-        
-        Args:
-            symbol: Raw symbol (e.g., 'BTCUSDT')
-            
-        Returns:
-            Formatted symbol (e.g., 'BTC/USDT')
-        """
+        """Format symbol to our standard format."""
         if symbol in self._symbol_mapping:
             return self._symbol_mapping[symbol]
         elif symbol.endswith('USDT'):
@@ -598,18 +562,10 @@ class BinanceAPIClient:
         return symbol
     
     def get_ticker_prices(self) -> Dict[str, float]:
-        """Get current prices for all supported symbols.
-        
-        Returns:
-            Dictionary mapping symbol to price
-            
-        Note:
-            Implements intelligent caching to minimize API calls
-        """
-        # Check cache first (optimized cache key)
+        """Get current prices for all supported symbols."""
+        # Check cache
         cache_key: str = 'all_prices'
         
-        # Fast cache check
         if cache_key in self.price_cache:
             cache_age: float = time.time() - self.cache_timestamp.get(cache_key, 0)
             if cache_age < self.cache_duration:
@@ -619,7 +575,6 @@ class BinanceAPIClient:
         data = self._make_request('ticker/price', weight=2)
         
         if data:
-            # Process response with list comprehension for performance
             prices: Dict[str, float] = {}
             for item in data:
                 symbol = item.get('symbol', '')
@@ -627,36 +582,24 @@ class BinanceAPIClient:
                     formatted_symbol = self._format_symbol(symbol)
                     try:
                         prices[formatted_symbol] = float(item['price'])
-                    except (ValueError, TypeError, KeyError) as e:
-                        logger.warning(f"Invalid price data for {symbol}: {e}")
+                    except (ValueError, TypeError, KeyError):
+                        continue
             
-            # Update cache atomically
+            # Update cache
             if prices:
                 self.price_cache[cache_key] = prices
                 self.cache_timestamp[cache_key] = time.time()
             
             return prices
         
-        # Fallback to cached data
-        if cache_key in self.price_cache:
-            logger.warning("Using cached prices due to API error")
-            return self.price_cache[cache_key]
-        
-        # Ultimate fallback
+        # Fallback
         logger.warning("Using fallback prices")
         return self._get_fallback_prices()
     
     def get_24hr_ticker(self, symbol: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Get 24-hour ticker statistics.
-        
-        Args:
-            symbol: Specific symbol or None for all symbols
-            
-        Returns:
-            Ticker data dictionary or None on failure
-        """
+        """Get 24-hour ticker statistics."""
         params: Optional[Dict[str, str]] = {'symbol': symbol} if symbol else None
-        weight: int = 1 if symbol else 40  # Weight depends on single vs all symbols
+        weight: int = 1 if symbol else 40
         
         data = self._make_request('ticker/24hr', params, weight=weight)
         
@@ -665,7 +608,6 @@ class BinanceAPIClient:
         
         try:
             if isinstance(data, list):
-                # Multiple symbols
                 result: Dict[str, Dict[str, float]] = {}
                 for item in data:
                     symbol = item.get('symbol', '')
@@ -680,7 +622,6 @@ class BinanceAPIClient:
                         }
                 return result
             else:
-                # Single symbol
                 return {
                     'price': float(data.get('lastPrice', 0)),
                     'change_24h': float(data.get('priceChangePercent', 0)),
@@ -691,19 +632,9 @@ class BinanceAPIClient:
             return None
     
     def get_orderbook(self, symbol: str, limit: int = 20) -> Optional[Dict[str, List]]:
-        """Get order book depth data.
-        
-        Args:
-            symbol: Trading pair symbol
-            limit: Number of price levels (5, 10, 20, 50, 100, 500, 1000, 5000)
-            
-        Returns:
-            Order book with bids and asks
-        """
-        # Validate limit parameter
+        """Get order book depth data."""
         valid_limits = {5, 10, 20, 50, 100, 500, 1000, 5000}
         if limit not in valid_limits:
-            logger.warning(f"Invalid orderbook limit {limit}, using 20")
             limit = 20
         
         params = {
@@ -719,21 +650,14 @@ class BinanceAPIClient:
                     'bids': [[float(p), float(q)] for p, q in data.get('bids', [])],
                     'asks': [[float(p), float(q)] for p, q in data.get('asks', [])]
                 }
-            except (ValueError, TypeError) as e:
-                logger.error(f"Error parsing orderbook data: {e}")
+            except (ValueError, TypeError):
+                pass
         
         return None
     
     @lru_cache(maxsize=1)
     def _get_fallback_prices(self) -> Dict[str, float]:
-        """Get fallback prices when API is unavailable (cached).
-        
-        Returns:
-            Static fallback prices dictionary
-            
-        Note:
-            These are reasonable estimates based on recent market conditions
-        """
+        """Get fallback prices when API is unavailable."""
         return {
             'BTC/USDT': 43500.00,
             'ETH/USDT': 2285.00,
@@ -753,11 +677,7 @@ class BinanceAPIClient:
         }
     
     def get_api_status(self) -> Dict[str, Any]:
-        """Get comprehensive API client status.
-        
-        Returns:
-            Dictionary with operational metrics
-        """
+        """Get comprehensive API client status."""
         success_count = self.total_requests - self.failed_requests
         success_rate = (success_count / max(self.total_requests, 1)) * 100
         
@@ -776,51 +696,21 @@ class BinanceAPIClient:
 # ======================== TRADING ALGORITHM ENGINE ========================
 
 class TradingAlgorithmEngine:
-    """Advanced trading algorithm implementation engine.
-    
-    Implements multiple technical analysis algorithms with optimized calculations.
-    Uses sliding window data structures for efficient memory usage.
-    
-    Attributes:
-        binance: Reference to Binance API client
-        price_history: Sliding window of historical prices per symbol
-        volume_history: Sliding window of historical volumes per symbol
-        indicators: Cached indicator values
-    """
+    """Advanced trading algorithm implementation engine."""
     
     def __init__(self, binance_client: BinanceAPIClient) -> None:
-        """Initialize algorithm engine with optimized data structures.
-        
-        Args:
-            binance_client: Initialized Binance API client instance
-        """
+        """Initialize algorithm engine."""
         self.binance = binance_client
-        
-        # Use defaultdict with deque for O(1) append and automatic cleanup
         self.price_history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=100))
         self.volume_history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=50))
-        
-        # Cache for expensive indicator calculations
         self.indicators: Dict[str, Dict[str, Any]] = defaultdict(dict)
         self._indicator_cache_time: Dict[str, float] = {}
-        
-        # Thread lock for thread-safe updates
         self._lock = threading.RLock()
     
     @thread_safe(threading.RLock())
     def update_history(self, symbol: str, price: float, volume: Optional[float] = None) -> None:
-        """Update price and volume history for a symbol.
-        
-        Args:
-            symbol: Trading pair symbol
-            price: Current price
-            volume: Current volume (optional)
-            
-        Note:
-            Thread-safe operation with automatic old data cleanup
-        """
+        """Update price and volume history for a symbol."""
         if price <= 0:
-            logger.warning(f"Invalid price {price} for {symbol}, skipping update")
             return
             
         self.price_history[symbol].append(price)
@@ -828,179 +718,114 @@ class TradingAlgorithmEngine:
         if volume is not None and volume >= 0:
             self.volume_history[symbol].append(volume)
         
-        # Invalidate cached indicators for this symbol
         if symbol in self._indicator_cache_time:
             del self._indicator_cache_time[symbol]
     
     @lru_cache(maxsize=256)
     def calculate_sma(self, symbol: str, period: int) -> float:
-        """Calculate Simple Moving Average (cached).
-        
-        Args:
-            symbol: Trading pair symbol
-            period: Number of periods for average
-            
-        Returns:
-            SMA value or last price if insufficient data
-        """
+        """Calculate Simple Moving Average."""
         prices = list(self.price_history[symbol])
         
         if len(prices) < period:
             return prices[-1] if prices else 0.0
         
-        # Use numpy-style operations for performance
         return sum(prices[-period:]) / period
     
     def calculate_rsi(self, symbol: str, period: int = 14) -> float:
-        """Calculate Relative Strength Index.
-        
-        Args:
-            symbol: Trading pair symbol
-            period: RSI period (default 14)
-            
-        Returns:
-            RSI value between 0 and 100
-        """
+        """Calculate Relative Strength Index."""
         prices = list(self.price_history[symbol])
         
         if len(prices) < period + 1:
-            return 50.0  # Neutral RSI
+            return 50.0
         
-        # Calculate price changes
         deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
-        
-        # Separate gains and losses
         gains = [max(0, d) for d in deltas]
         losses = [max(0, -d) for d in deltas]
         
-        # Calculate averages
         avg_gain = sum(gains[-period:]) / period
         avg_loss = sum(losses[-period:]) / period
         
-        # Prevent division by zero
         if avg_loss == 0:
             return 100.0 if avg_gain > 0 else 50.0
         
-        # Calculate RSI
         rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
         
         return rsi
     
     def calculate_macd(self, symbol: str) -> Tuple[float, float, float]:
-        """Calculate MACD indicator.
-        
-        Args:
-            symbol: Trading pair symbol
-            
-        Returns:
-            Tuple of (MACD line, Signal line, Histogram)
-        """
+        """Calculate MACD indicator."""
         prices = list(self.price_history[symbol])
         
         if len(prices) < 26:
             return 0.0, 0.0, 0.0
         
-        # Calculate EMAs
         ema_12 = self._calculate_ema(prices, 12)
         ema_26 = self._calculate_ema(prices, 26)
         
-        # MACD line
         macd_line = ema_12 - ema_26
-        
-        # Signal line (9-period EMA of MACD)
-        # Simplified for single value
-        signal_line = macd_line * 0.9  # Approximation
-        
-        # Histogram
+        signal_line = macd_line * 0.9
         histogram = macd_line - signal_line
         
         return macd_line, signal_line, histogram
     
     def _calculate_ema(self, prices: List[float], period: int) -> float:
-        """Calculate Exponential Moving Average.
-        
-        Args:
-            prices: List of prices
-            period: EMA period
-            
-        Returns:
-            EMA value
-        """
+        """Calculate Exponential Moving Average."""
         if len(prices) < period:
             return prices[-1] if prices else 0.0
         
-        # EMA multiplier
         multiplier = 2.0 / (period + 1)
-        
-        # Initialize with SMA
         ema = sum(prices[:period]) / period
         
-        # Calculate EMA
         for price in prices[period:]:
             ema = (price * multiplier) + (ema * (1 - multiplier))
         
         return ema
     
     def analyze(self, symbol: str, current_price: float) -> List[Dict[str, Any]]:
-        """Analyze symbol and generate trading signals.
-        
-        Args:
-            symbol: Trading pair symbol
-            current_price: Current market price
-            
-        Returns:
-            List of trading signals from different algorithms
-            
-        Note:
-            Optimized to avoid redundant calculations
-        """
+        """Analyze symbol and generate trading signals."""
         signals: List[Dict[str, Any]] = []
         
-        # Update history first
         self.update_history(symbol, current_price)
         
-        # Check if we have enough data
         price_count = len(self.price_history[symbol])
         if price_count < 20:
-            logger.debug(f"Insufficient data for {symbol}: {price_count} prices")
             return signals
         
-        # Pre-calculate common indicators (avoid redundant calculations)
         sma_20 = self.calculate_sma(symbol, 20)
         sma_5 = self.calculate_sma(symbol, 5)
         rsi = self.calculate_rsi(symbol)
         
-        # 1. MOMENTUM Algorithm
+        # Momentum Algorithm
         momentum_ratio = sma_5 / sma_20 if sma_20 > 0 else 1.0
         
-        if momentum_ratio > 1.01:  # 1% above
+        if momentum_ratio > 1.01:
             signals.append({
                 'algorithm': 'MULTI_TIMEFRAME_MOMENTUM',
                 'signal': 'BUY',
                 'strength': min((momentum_ratio - 1) * 100, 1.0),
-                'reason': f'Momentum breakout (SMA5/SMA20 = {momentum_ratio:.3f})'
+                'reason': f'Momentum breakout ({momentum_ratio:.3f})'
             })
-        elif momentum_ratio < 0.99:  # 1% below
+        elif momentum_ratio < 0.99:
             signals.append({
                 'algorithm': 'MULTI_TIMEFRAME_MOMENTUM',
                 'signal': 'SELL',
                 'strength': min((1 - momentum_ratio) * 100, 1.0),
-                'reason': f'Momentum breakdown (SMA5/SMA20 = {momentum_ratio:.3f})'
+                'reason': f'Momentum breakdown ({momentum_ratio:.3f})'
             })
         
-        # 2. MEAN REVERSION Algorithm
+        # Mean Reversion Algorithm
         if sma_20 > 0:
             deviation = (current_price - sma_20) / sma_20
             
-            if deviation < -0.02:  # 2% below mean
+            if deviation < -0.02:
                 signals.append({
                     'algorithm': 'STATISTICAL_MEAN_REVERSION',
                     'signal': 'BUY',
                     'strength': min(abs(deviation) * 25, 1.0),
                     'reason': f'Price {abs(deviation)*100:.1f}% below mean'
                 })
-            elif deviation > 0.02:  # 2% above mean
+            elif deviation > 0.02:
                 signals.append({
                     'algorithm': 'STATISTICAL_MEAN_REVERSION',
                     'signal': 'SELL', 
@@ -1008,7 +833,7 @@ class TradingAlgorithmEngine:
                     'reason': f'Price {abs(deviation)*100:.1f}% above mean'
                 })
         
-        # 3. RSI Algorithm
+        # RSI Algorithm
         if rsi < 30:
             signals.append({
                 'algorithm': 'RSI_DIVERGENCE',
@@ -1024,7 +849,7 @@ class TradingAlgorithmEngine:
                 'reason': f'RSI overbought at {rsi:.1f}'
             })
         
-        # 4. MACD Algorithm
+        # MACD Algorithm
         macd, signal, histogram = self.calculate_macd(symbol)
         
         if abs(histogram) > 0.001:
@@ -1043,12 +868,12 @@ class TradingAlgorithmEngine:
                     'reason': 'MACD bearish crossover'
                 })
         
-        # 5. SCALPING Algorithm
+        # Scalping Algorithm
         recent_prices = list(self.price_history[symbol])[-5:]
         if len(recent_prices) >= 5 and recent_prices[0] > 0:
             price_change = (recent_prices[-1] - recent_prices[0]) / recent_prices[0]
             
-            if abs(price_change) > 0.001:  # 0.1% movement
+            if abs(price_change) > 0.001:
                 signals.append({
                     'algorithm': 'SCALPING',
                     'signal': 'BUY' if price_change > 0 else 'SELL',
@@ -1056,7 +881,7 @@ class TradingAlgorithmEngine:
                     'reason': f'Micro movement {price_change*100:.2f}%'
                 })
         
-        # 6. VOLUME BREAKOUT Algorithm
+        # Volume Breakout Algorithm
         if self.volume_history[symbol]:
             volumes = list(self.volume_history[symbol])
             if len(volumes) >= 2:
@@ -1069,7 +894,7 @@ class TradingAlgorithmEngine:
                         'algorithm': 'BREAKOUT_DETECTION',
                         'signal': price_direction,
                         'strength': min((current_volume / avg_volume - 1), 1.0),
-                        'reason': f'Volume spike {current_volume/avg_volume:.1f}x average'
+                        'reason': f'Volume spike {current_volume/avg_volume:.1f}x'
                     })
         
         return signals
@@ -1077,45 +902,25 @@ class TradingAlgorithmEngine:
 # ======================== PROFESSIONAL TRADING ENGINE ========================
 
 class ProfessionalTradingEngine:
-    """Core trading engine with position management and risk control.
-    
-    Features:
-        - Real-time position tracking
-        - Algorithm performance metrics
-        - Balance persistence
-        - Risk management with stop-loss and take-profit
-        - Thread-safe operations
-    
-    Attributes:
-        binance: Binance API client instance
-        algo_engine: Algorithm engine instance
-        balance: Current account balance
-        open_trades: List of currently open positions
-        algorithm_performance: Performance metrics per algorithm
-    """
+    """Core trading engine with position management and risk control."""
     
     def __init__(self) -> None:
-        """Initialize trading engine with saved state recovery."""
-        # Initialize API clients
+        """Initialize trading engine."""
         self.binance = BinanceAPIClient()
         self.algo_engine = TradingAlgorithmEngine(self.binance)
         
-        # Thread safety
         self._balance_lock = threading.RLock()
         self._trade_lock = threading.RLock()
         
-        # Load saved balance or use initial
         self.balance: float = self._load_balance()
         self.starting_balance: float = self.balance
         
-        # Account state
         self.available_balance: float = self.balance
         self.margin_used: float = 0.0
         self.total_pnl: float = 0.0
         self.realized_pnl: float = 0.0
         self.unrealized_pnl: float = 0.0
         
-        # Trading statistics
         self.total_trades: int = 0
         self.winning_trades: int = 0
         self.losing_trades: int = 0
@@ -1124,37 +929,30 @@ class ProfessionalTradingEngine:
         self.largest_loss: float = 0.0
         self.total_volume: float = 0.0
         
-        # Position management
         self.open_trades: List[Dict[str, Any]] = []
         self.closed_trades: List[Dict[str, Any]] = []
         self.next_trade_id: int = 1
         
-        # Risk parameters
         self.max_leverage: int = MAX_LEVERAGE
         self.current_leverage: float = 0.0
         
-        # Performance tracking
         self.algorithm_performance: Dict[str, Dict[str, Any]] = defaultdict(
             lambda: {'trades': 0, 'wins': 0, 'pnl': 0.0}
         )
         
-        # Market data
         self.prices: Dict[str, float] = {}
         self.price_changes: Dict[str, float] = {}
         self.last_price_update: float = 0
         
-        # System timestamps
         self.start_time: datetime = datetime.now()
         self._last_save_time: float = time.time()
         
-        # Start background threads
         self._start_background_threads()
         
         logger.info(f"Trading engine initialized with balance: ${self.balance:.2f}")
     
     def _start_background_threads(self) -> None:
         """Start all background processing threads."""
-        # Price update thread
         price_thread = threading.Thread(
             target=self._price_update_loop,
             daemon=True,
@@ -1162,7 +960,6 @@ class ProfessionalTradingEngine:
         )
         price_thread.start()
         
-        # Balance save thread
         save_thread = threading.Thread(
             target=self._auto_save_loop,
             daemon=True,
@@ -1174,11 +971,7 @@ class ProfessionalTradingEngine:
     
     @retry_on_exception(max_retries=3)
     def _load_balance(self) -> float:
-        """Load balance from persistent storage.
-        
-        Returns:
-            Saved balance or initial balance if not found
-        """
+        """Load balance from persistent storage."""
         balance_file: str = os.path.join(DATA_DIR, BALANCE_FILE)
         
         try:
@@ -1186,18 +979,15 @@ class ProfessionalTradingEngine:
                 with open(balance_file, 'r') as f:
                     data = json.load(f)
                     
-                    # Validate loaded data
                     if not isinstance(data, dict):
                         raise ValueError("Invalid balance file format")
                     
                     saved_balance = float(data.get('balance', INITIAL_BALANCE))
                     
-                    # Sanity check
                     if saved_balance < 0:
-                        logger.warning(f"Negative balance loaded: {saved_balance}, using initial")
+                        logger.warning(f"Negative balance loaded: {saved_balance}")
                         return INITIAL_BALANCE
                     
-                    # Load additional state if available
                     self.total_pnl = float(data.get('total_pnl', 0))
                     self.realized_pnl = float(data.get('realized_pnl', 0))
                     
@@ -1214,16 +1004,11 @@ class ProfessionalTradingEngine:
     
     @thread_safe(threading.RLock())
     def _save_balance(self) -> None:
-        """Save current balance to persistent storage.
-        
-        Note:
-            Thread-safe operation with atomic write
-        """
+        """Save current balance to persistent storage."""
         balance_file: str = os.path.join(DATA_DIR, BALANCE_FILE)
         temp_file: str = balance_file + '.tmp'
         
         try:
-            # Prepare data
             data = {
                 'balance': round(self.balance, 2),
                 'timestamp': datetime.now().isoformat(),
@@ -1235,18 +1020,14 @@ class ProfessionalTradingEngine:
                 'open_positions': len(self.open_trades)
             }
             
-            # Write to temp file first (atomic operation)
             with open(temp_file, 'w') as f:
                 json.dump(data, f, indent=2)
             
-            # Atomic rename
             os.replace(temp_file, balance_file)
-            
             self._last_save_time = time.time()
             
         except Exception as e:
             logger.error(f"Error saving balance: {e}")
-            # Clean up temp file if exists
             if os.path.exists(temp_file):
                 try:
                     os.remove(temp_file)
@@ -1255,13 +1036,12 @@ class ProfessionalTradingEngine:
     
     def _auto_save_loop(self) -> None:
         """Periodically save balance to disk."""
-        save_interval = 30  # seconds
+        save_interval = 30
         
         while True:
             try:
                 time.sleep(save_interval)
                 
-                # Only save if there have been changes
                 if self.total_trades > 0 or time.time() - self._last_save_time > 300:
                     self._save_balance()
                     
@@ -1272,18 +1052,15 @@ class ProfessionalTradingEngine:
         """Continuously update prices from Binance API."""
         while True:
             try:
-                # Get real prices from Binance
                 ticker_data = self.binance.get_24hr_ticker()
                 
                 if ticker_data:
-                    # Update prices atomically
                     with self._trade_lock:
                         for symbol, data in ticker_data.items():
                             if isinstance(data, dict):
                                 self.prices[symbol] = data.get('price', 0)
                                 self.price_changes[symbol] = data.get('change_24h', 0)
                                 
-                                # Update algorithm engine
                                 self.algo_engine.update_history(
                                     symbol, 
                                     data.get('price', 0),
@@ -1301,15 +1078,10 @@ class ProfessionalTradingEngine:
                 
             except Exception as e:
                 logger.error(f"Price update error: {e}")
-                time.sleep(PRICE_UPDATE_INTERVAL * 2)  # Back off on error
+                time.sleep(PRICE_UPDATE_INTERVAL * 2)
     
     def get_current_prices(self) -> Dict[str, float]:
-        """Get current prices with staleness check.
-        
-        Returns:
-            Dictionary of current market prices
-        """
-        # Check if prices are stale
+        """Get current prices with staleness check."""
         if time.time() - self.last_price_update > 10:
             logger.warning("Prices are stale, attempting direct fetch")
             
@@ -1330,24 +1102,11 @@ class ProfessionalTradingEngine:
         algorithm: Optional[str] = None,
         reason: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """Open a new leveraged trade position.
-        
-        Args:
-            symbol: Trading pair symbol
-            side: LONG or SHORT
-            leverage: Leverage multiplier
-            algorithm: Algorithm that triggered the trade
-            reason: Reason for trade entry
-            
-        Returns:
-            Trade dictionary or None if unable to open
-        """
-        # Get current prices
+        """Open a new leveraged trade position."""
         prices = self.get_current_prices()
         
-        # Auto-select parameters if not specified
         if not symbol:
-            symbol = random.choice(list(prices.keys())[:10])  # Top 10 only
+            symbol = random.choice(list(prices.keys())[:10])
         if not side:
             side = random.choice(['LONG', 'SHORT'])
         if not leverage:
@@ -1355,7 +1114,6 @@ class ProfessionalTradingEngine:
         if not algorithm:
             algorithm = random.choice(ALGORITHM_IDS)
         
-        # Validate inputs
         if symbol not in prices:
             logger.warning(f"Symbol {symbol} not in price feed")
             return None
@@ -1365,22 +1123,18 @@ class ProfessionalTradingEngine:
             logger.warning(f"Invalid price {price} for {symbol}")
             return None
         
-        # Position sizing with risk management
         risk_amount = self.available_balance * random.uniform(POSITION_SIZE_MIN, POSITION_SIZE_MAX)
         position_size = risk_amount * leverage
         margin_required = position_size / leverage
         
-        # Check available balance
         if margin_required > self.available_balance:
-            logger.warning(f"Insufficient balance for trade: required={margin_required:.2f}, available={self.available_balance:.2f}")
+            logger.warning(f"Insufficient balance")
             return None
         
-        # Check max positions
         if len(self.open_trades) >= MAX_OPEN_POSITIONS:
-            logger.warning(f"Maximum positions reached: {MAX_OPEN_POSITIONS}")
+            logger.warning(f"Maximum positions reached")
             return None
         
-        # Create trade object
         trade = {
             'id': self.next_trade_id,
             'symbol': symbol,
@@ -1402,7 +1156,6 @@ class ProfessionalTradingEngine:
             'algorithm_reason': reason or f"Signal from {TRADING_ALGORITHMS[algorithm]['name']}"
         }
         
-        # Update engine state
         self.next_trade_id += 1
         self.open_trades.append(trade)
         self.available_balance -= margin_required
@@ -1410,7 +1163,6 @@ class ProfessionalTradingEngine:
         self.total_trades += 1
         self.total_volume += position_size
         
-        # Track algorithm performance
         self.algorithm_performance[algorithm]['trades'] += 1
         
         logger.info(
@@ -1426,7 +1178,6 @@ class ProfessionalTradingEngine:
         prices = self.get_current_prices()
         self.unrealized_pnl = 0.0
         
-        # Process each open trade
         trades_to_close = []
         
         for trade in self.open_trades:
@@ -1435,10 +1186,9 @@ class ProfessionalTradingEngine:
                 
             trade['current_price'] = prices[trade['symbol']]
             
-            # Calculate P&L
             if trade['side'] == 'LONG':
                 price_change = (trade['current_price'] - trade['entry_price']) / trade['entry_price']
-            else:  # SHORT
+            else:
                 price_change = (trade['entry_price'] - trade['current_price']) / trade['entry_price']
             
             trade['pnl'] = price_change * trade['position_value']
@@ -1446,7 +1196,6 @@ class ProfessionalTradingEngine:
             
             self.unrealized_pnl += trade['pnl']
             
-            # Check stop-loss and take-profit
             should_close = False
             
             if trade['side'] == 'LONG':
@@ -1456,7 +1205,7 @@ class ProfessionalTradingEngine:
                 elif trade['current_price'] >= trade['tp']:
                     logger.info(f"Take-profit triggered for trade #{trade['id']}")
                     should_close = True
-            else:  # SHORT
+            else:
                 if trade['current_price'] >= trade['sl']:
                     logger.info(f"Stop-loss triggered for trade #{trade['id']}")
                     should_close = True
@@ -1467,29 +1216,18 @@ class ProfessionalTradingEngine:
             if should_close:
                 trades_to_close.append(trade['id'])
         
-        # Close triggered trades
         for trade_id in trades_to_close:
             self.close_trade(trade_id)
         
-        # Update totals
         self.total_pnl = self.realized_pnl + self.unrealized_pnl
         self.calculate_leverage()
         
-        # Save balance after updates
         if trades_to_close or self.total_trades % 10 == 0:
             self._save_balance()
     
     @thread_safe(threading.RLock())
     def close_trade(self, trade_id: int) -> bool:
-        """Close a specific trade and update performance metrics.
-        
-        Args:
-            trade_id: Unique trade identifier
-            
-        Returns:
-            True if trade was closed successfully
-        """
-        # Find trade
+        """Close a specific trade and update performance metrics."""
         trade = None
         for t in self.open_trades:
             if t['id'] == trade_id:
@@ -1500,22 +1238,18 @@ class ProfessionalTradingEngine:
             logger.warning(f"Trade #{trade_id} not found")
             return False
         
-        # Update trade status
         trade['status'] = 'CLOSED'
         trade['close_time'] = datetime.now()
         trade['close_price'] = trade['current_price']
         
-        # Update balances
         self.available_balance += trade['margin'] + trade['pnl']
         self.balance += trade['pnl']
-        self.margin_used = max(0, self.margin_used - trade['margin'])  # Prevent negative
+        self.margin_used = max(0, self.margin_used - trade['margin'])
         self.realized_pnl += trade['pnl']
         
-        # Update algorithm performance
         algo = trade['algorithm']
         self.algorithm_performance[algo]['pnl'] += trade['pnl']
         
-        # Update statistics
         if trade['pnl'] > 0:
             self.winning_trades += 1
             self.algorithm_performance[algo]['wins'] += 1
@@ -1526,19 +1260,15 @@ class ProfessionalTradingEngine:
             if trade['pnl'] < self.largest_loss:
                 self.largest_loss = trade['pnl']
         
-        # Update win rate
         if self.total_trades > 0:
             self.win_rate = (self.winning_trades / self.total_trades) * 100
         
-        # Move to closed trades
         self.open_trades.remove(trade)
         self.closed_trades.append(trade)
         
-        # Limit closed trades history
         if len(self.closed_trades) > 100:
             self.closed_trades = self.closed_trades[-100:]
         
-        # Save balance after closing
         self._save_balance()
         
         logger.info(
@@ -1549,11 +1279,7 @@ class ProfessionalTradingEngine:
         return True
     
     def close_all_trades(self) -> bool:
-        """Close all open trades.
-        
-        Returns:
-            True if all trades closed successfully
-        """
+        """Close all open trades."""
         trades_to_close = [trade['id'] for trade in self.open_trades.copy()]
         
         success = True
@@ -1564,11 +1290,7 @@ class ProfessionalTradingEngine:
         return success
     
     def calculate_leverage(self) -> float:
-        """Calculate current account leverage.
-        
-        Returns:
-            Current leverage ratio
-        """
+        """Calculate current account leverage."""
         if self.balance <= 0:
             self.current_leverage = 0.0
             return 0.0
@@ -1579,27 +1301,17 @@ class ProfessionalTradingEngine:
         return self.current_leverage
     
     def execute_auto_trade(self) -> Optional[Dict[str, Any]]:
-        """Execute automatic trading based on algorithm signals.
-        
-        Returns:
-            New trade dictionary or None if no trade executed
-        """
-        # Check if we can open more positions
+        """Execute automatic trading based on algorithm signals."""
         if len(self.open_trades) >= MAX_OPEN_POSITIONS:
-            logger.debug(f"Max positions reached: {len(self.open_trades)}/{MAX_OPEN_POSITIONS}")
             return None
         
-        # Get current prices
         prices = self.get_current_prices()
         if not prices:
-            logger.warning("No prices available for auto trading")
             return None
         
-        # Analyze symbols and find best signal
         best_signal = None
         best_strength = 0.0
         
-        # Limit analysis to top symbols for performance
         symbols_to_analyze = list(prices.keys())[:10]
         
         for symbol in symbols_to_analyze:
@@ -1610,21 +1322,16 @@ class ProfessionalTradingEngine:
             if price <= 0:
                 continue
             
-            # Get signals from algorithm engine
             signals = self.algo_engine.analyze(symbol, price)
             
-            # Find strongest signal
             for signal in signals:
                 if signal['strength'] > best_strength:
                     best_signal = signal
                     best_signal['symbol'] = symbol
                     best_strength = signal['strength']
         
-        # Execute trade if signal is strong enough
         if best_signal and best_strength >= MIN_TRADE_CONFIDENCE:
             side = 'LONG' if best_signal['signal'] == 'BUY' else 'SHORT'
-            
-            # Dynamic leverage based on signal strength
             leverage = min(int(best_strength * 5) + 1, self.max_leverage)
             
             return self.open_trade(
@@ -1638,7 +1345,6 @@ class ProfessionalTradingEngine:
         return None
 
 # ======================== GLOBAL ENGINE INSTANCE ========================
-# Initialize once to maintain state
 
 try:
     engine = ProfessionalTradingEngine()
@@ -1649,11 +1355,7 @@ except Exception as e:
 # ======================== WEB DASHBOARD HANDLER ========================
 
 class NuclearHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for the trading dashboard.
-    
-    Provides web interface and API endpoints for trade management.
-    Optimized for performance with minimal blocking operations.
-    """
+    """HTTP request handler for the trading dashboard."""
     
     def do_GET(self) -> None:
         """Handle GET requests."""
@@ -1762,16 +1464,13 @@ class NuclearHandler(BaseHTTPRequestHandler):
     
     def serve_dashboard(self) -> None:
         """Serve the main dashboard HTML."""
-        # Pre-calculate all metrics
         roi = ((engine.balance - engine.starting_balance) / engine.starting_balance * 100) if engine.starting_balance > 0 else 0.0
         api_status = engine.binance.get_api_status()
         
-        # Generate HTML sections efficiently
         price_html = self._generate_price_html()
         trades_html = self._generate_trades_html()
         algo_stats_html = self._generate_algo_stats_html()
         
-        # Use string formatting for the large HTML template
         html = self._get_dashboard_html(roi, api_status, price_html, trades_html, algo_stats_html)
         
         self.send_response(200)
@@ -1784,12 +1483,10 @@ class NuclearHandler(BaseHTTPRequestHandler):
         """Generate HTML for price display."""
         html_parts = []
         
-        # Limit to first 15 prices for performance
         for symbol, price in list(engine.prices.items())[:15]:
             change = engine.price_changes.get(symbol, 0)
             color = '#00ff88' if change >= 0 else '#ff4444'
             
-            # Format price based on magnitude
             if price < 1:
                 price_str = f"{price:.6f}"
             elif price < 10:
@@ -1819,7 +1516,6 @@ class NuclearHandler(BaseHTTPRequestHandler):
             pnl_color = '#00ff88' if trade['pnl'] >= 0 else '#ff4444'
             algo_color = TRADING_ALGORITHMS[trade['algorithm']]['color']
             
-            # Format prices
             entry_str = f"{trade['entry_price']:.6f}" if trade['entry_price'] < 1 else f"{trade['entry_price']:.2f}"
             current_str = f"{trade['current_price']:.6f}" if trade['current_price'] < 1 else f"{trade['current_price']:.2f}"
             
@@ -1851,7 +1547,6 @@ class NuclearHandler(BaseHTTPRequestHandler):
         
         html_parts = []
         
-        # Sort by P&L descending
         sorted_algos = sorted(
             engine.algorithm_performance.items(),
             key=lambda x: x[1]['pnl'],
@@ -1882,7 +1577,6 @@ class NuclearHandler(BaseHTTPRequestHandler):
     
     def _get_dashboard_html(self, roi: float, api_status: Dict, price_html: str, trades_html: str, algo_stats_html: str) -> str:
         """Get complete dashboard HTML."""
-        # This is kept as-is from original but could be moved to a template file
         return f'''<!DOCTYPE html>
 <html>
 <head>
@@ -2196,17 +1890,12 @@ class NuclearHandler(BaseHTTPRequestHandler):
     
     def log_message(self, format: str, *args) -> None:
         """Override to suppress request logging."""
-        # Silently ignore to reduce console noise
         pass
 
 # ======================== MAIN TRADING LOOP ========================
 
 def trading_loop() -> None:
-    """Main trading loop with error recovery.
-    
-    Continuously updates trades and executes auto-trading based on signals.
-    Implements graceful error handling and recovery.
-    """
+    """Main trading loop with error recovery."""
     logger.info("Starting production trading engine with Binance API...")
     
     consecutive_errors = 0
@@ -2214,10 +1903,8 @@ def trading_loop() -> None:
     
     while True:
         try:
-            # Update existing trades
             engine.update_trades()
             
-            # Execute auto trading with probability check
             if len(engine.open_trades) < MAX_OPEN_POSITIONS and random.random() < 0.1:
                 trade = engine.execute_auto_trade()
                 
@@ -2248,11 +1935,7 @@ def trading_loop() -> None:
 # ======================== MAIN ENTRY POINT ========================
 
 def main() -> None:
-    """Main application entry point.
-    
-    Initializes all components and starts the HTTP server.
-    Implements graceful shutdown handling.
-    """
+    """Main application entry point."""
     # Print active algorithms
     print("\n📊 ACTIVE TRADING ALGORITHMS:")
     for i, (algo_id, algo_info) in enumerate(TRADING_ALGORITHMS.items(), 1):
@@ -2291,6 +1974,7 @@ def main() -> None:
   • Resource optimization and connection pooling
   • Input validation and sanitization
   • Atomic file operations for persistence
+  • FIXED: Gzip response decompression
 
 Dependencies:
   • No external packages required (uses urllib)
@@ -2332,6 +2016,3 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"Unhandled exception: {e}")
         sys.exit(1)
-
-
-
