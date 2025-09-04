@@ -17,6 +17,8 @@ Fine-tuning optimizations applied:
 
 import os
 import sys
+import gzip
+import gzip
 import json
 import time
 import threading
@@ -2328,3 +2330,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"Unhandled exception: {e}")
         sys.exit(1)
+
